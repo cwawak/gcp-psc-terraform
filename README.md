@@ -136,8 +136,8 @@ Follow these steps sequentially. Run commands from the root directory of this re
 1.  **Authenticate GCP:** `gcloud auth application-default login` (Follow browser prompts).
 2.  **Set Confluent Credentials:**
     ```bash
-    export CONFLUENT_CLOUD_API_KEY="Your Confluent Cloud Key"
-    export CONFLUENT_CLOUD_API_SECRET="Your Confluent Cloud Secret"
+    export CONFLUENT_CLOUD_API_KEY="Your Confluent Key"
+    export CONFLUENT_CLOUD_API_SECRET="Your Confluent Secret"
     ```
 
 **Step 1: Deploy GCP Base Infrastructure (`01-gcp-base`)**

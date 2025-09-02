@@ -104,6 +104,94 @@ resource "google_compute_instance" "vm" {
   # Tags are labels used for identification and targeting by firewall rules.
   tags = [local.vm_full_name, var.username, var.resource_prefix]
 
+  metadata_startup_script = <<-EOT
+    #!/bin/bash
+    set -e
+    
+    echo "=== Starting WireGuard VPN Server Setup ==="
+    
+    # Update package list and install WireGuard
+    echo "Installing WireGuard..."
+    apt-get update
+    apt-get install -y wireguard curl
+    
+    # Enable IP forwarding in the kernel and make it persistent
+    echo "Enabling IP forwarding..."
+    echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+    sysctl -p
+    
+    # Create WireGuard directory and generate keys
+    echo "Setting up WireGuard configuration..."
+    mkdir -p /etc/wireguard
+    cd /etc/wireguard
+    
+    # Generate server and client key pairs
+    echo "Generating WireGuard keys..."
+    wg genkey | tee server_private.key | wg pubkey > server_public.key
+    wg genkey | tee client_private.key | wg pubkey > client_public.key
+    
+    # Get the server's external IP for client config
+    EXTERNAL_IP=$(curl -s ifconfig.me || curl -s icanhazip.com || curl -s ipinfo.io/ip)
+    
+    # Create WireGuard server configuration
+    echo "Creating server configuration..."
+    cat > wg0.conf << EOF
+# WireGuard Server Configuration
+[Interface]
+Address = 10.200.0.1/24
+ListenPort = ${var.wireguard_listen_port}
+PrivateKey = $(cat server_private.key)
+
+# NAT and forwarding rules for ens4 (GCP default interface)
+PostUp = iptables -t nat -A POSTROUTING -o ens4 -j MASQUERADE; iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o ens4 -j ACCEPT
+PostDown = iptables -t nat -D POSTROUTING -o ens4 -j MASQUERADE; iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o ens4 -j ACCEPT
+
+[Peer]
+# Client peer configuration
+PublicKey = $(cat client_public.key)
+AllowedIPs = 10.200.0.2/32
+EOF
+    
+    # Set proper permissions on server config
+    chmod 600 wg0.conf
+    
+    # Create client configuration file in accessible location
+    echo "Creating client configuration..."
+    cat > /tmp/client.conf << EOF
+# WireGuard Client Configuration
+# Import this file into your WireGuard client application
+[Interface]
+PrivateKey = $(cat client_private.key)
+Address = 10.200.0.2/32
+DNS = 8.8.8.8
+
+[Peer]
+PublicKey = $(cat server_public.key)
+Endpoint = $EXTERNAL_IP:${var.wireguard_listen_port}
+AllowedIPs = ${var.subnet_ip_cidr}, 10.200.0.0/24
+PersistentKeepalive = 25
+EOF
+    
+    # Make client config readable by user
+    chmod 644 /tmp/client.conf
+    
+    # Enable and start WireGuard service
+    echo "Starting WireGuard service..."
+    systemctl enable wg-quick@wg0
+    systemctl start wg-quick@wg0
+    
+    # Verify service status
+    echo "Verifying WireGuard service..."
+    systemctl is-active wg-quick@wg0 || echo "Warning: WireGuard service may not be running properly"
+    
+    # Create success indicator file
+    echo "WireGuard setup completed successfully at $(date)" > /tmp/wireguard-setup-complete
+    
+    echo "=== WireGuard VPN Server Setup Complete ==="
+    echo "Client configuration file created at: /tmp/client.conf"
+    echo "Use 'gcloud compute ssh' to retrieve the client config file"
+  EOT
+
   # Defines the boot disk configuration for the VM.
   boot_disk {
     initialize_params {
@@ -191,6 +279,23 @@ resource "google_compute_firewall" "allow_wireguard_from_user" {
   depends_on = [google_compute_network.vpc]
 }
 
+# 8. Firewall Rule: Allows all internal traffic within the VPC subnet.
+# This is a crucial rule for allowing resources within the same network to communicate freely.
+# It was added to resolve intra-VPC connectivity issues discovered during debugging.
+resource "google_compute_firewall" "allow_internal" {
+  name    = "${var.username}-${var.resource_prefix}-allow-internal"
+  network = google_compute_network.vpc.name
+  project = var.gcp_project_id
+
+  # Allow all protocols (tcp, udp, icmp, etc.)
+  allow {
+    protocol = "all"
+  }
+
+  # This rule applies to any traffic originating from within the subnet.
+  source_ranges = [var.subnet_ip_cidr]
+}
+
 # --- Outputs ---
 # Exposes important information about the created resources for reference or use in subsequent steps.
 
@@ -255,4 +360,57 @@ output "vm_ssh_command_iap" {
   description = "Example gcloud command to SSH into the VM using IAP tunneling (requires specific IAM permissions and no external IP)."
   # Note: This setup uses an external IP, making standard SSH more direct if firewall allows. IAP is an alternative.
   value       = "gcloud compute ssh ${local.vm_full_name} --zone ${var.zone} --project ${var.gcp_project_id} --tunnel-through-iap"
+}
+
+# --- WireGuard VPN Configuration Outputs ---
+# These outputs provide clear instructions for obtaining the WireGuard client configuration.
+
+output "wireguard_server_endpoint" {
+  description = "The WireGuard server endpoint (IP:PORT) for client configuration."
+  value       = try("${google_compute_instance.vm.network_interface[0].access_config[0].nat_ip}:${var.wireguard_listen_port}", "<EXTERNAL_IP_KNOWN_AFTER_APPLY>:${var.wireguard_listen_port}")
+}
+
+output "wireguard_setup_status_check" {
+  description = "Command to check if WireGuard setup completed successfully on the VM."
+  value       = "gcloud compute ssh ${local.vm_full_name} --zone ${var.zone} --project ${var.gcp_project_id} --command='cat /tmp/wireguard-setup-complete'"
+}
+
+output "wireguard_server_status_check" {
+  description = "Command to verify WireGuard service is running on the VM."
+  value       = "gcloud compute ssh ${local.vm_full_name} --zone ${var.zone} --project ${var.gcp_project_id} --command='sudo systemctl status wg-quick@wg0'"
+}
+
+output "WIREGUARD_CLIENT_CONFIG_INSTRUCTIONS" {
+  description = "🔧 IMPORTANT: How to get your WireGuard client configuration file."
+  value = <<-EOT
+
+
+  ╔═══════════════════════════════════════════════════════════════════════════════╗
+  ║                      🔧 WIREGUARD CLIENT SETUP INSTRUCTIONS                    ║
+  ╠═══════════════════════════════════════════════════════════════════════════════╣
+  ║                                                                               ║
+  ║  1. Wait for VM startup to complete (2-3 minutes after terraform apply)      ║
+  ║                                                                               ║
+  ║  2. Get your client configuration file:                                      ║
+  ║     gcloud compute ssh ${local.vm_full_name} \                                  ║
+  ║       --zone ${var.zone} \                                                      ║
+  ║       --project ${var.gcp_project_id} \                                         ║
+  ║       --command="cat /tmp/client.conf" > my-wireguard-client.conf             ║
+  ║                                                                               ║
+  ║  3. Import the downloaded file into your WireGuard client:                   ║
+  ║     • Mobile: Use QR code or import file                                     ║
+  ║     • Desktop: Import tunnel from file                                       ║
+  ║     • Command line: wg-quick up my-wireguard-client.conf                     ║
+  ║                                                                               ║
+  ║  4. Connect to your VPN and test connectivity!                               ║
+  ║                                                                               ║
+  ║  🔍 TROUBLESHOOTING:                                                          ║
+  ║  • Check setup status: use 'wireguard_setup_status_check' output            ║
+  ║  • Check service status: use 'wireguard_server_status_check' output         ║
+  ║  • View server logs: gcloud compute ssh [...] --command='journalctl -u wg-quick@wg0' ║
+  ║                                                                               ║
+  ╚═══════════════════════════════════════════════════════════════════════════════╝
+
+
+  EOT
 }
