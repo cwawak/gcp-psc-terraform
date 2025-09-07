@@ -384,33 +384,27 @@ output "WIREGUARD_CLIENT_CONFIG_INSTRUCTIONS" {
   description = "🔧 IMPORTANT: How to get your WireGuard client configuration file."
   value = <<-EOT
 
+🔧 WIREGUARD CLIENT SETUP INSTRUCTIONS
 
-  ╔═══════════════════════════════════════════════════════════════════════════════╗
-  ║                      🔧 WIREGUARD CLIENT SETUP INSTRUCTIONS                    ║
-  ╠═══════════════════════════════════════════════════════════════════════════════╣
-  ║                                                                               ║
-  ║  1. Wait for VM startup to complete (2-3 minutes after terraform apply)      ║
-  ║                                                                               ║
-  ║  2. Get your client configuration file:                                      ║
-  ║     gcloud compute ssh ${local.vm_full_name} \                                  ║
-  ║       --zone ${var.zone} \                                                      ║
-  ║       --project ${var.gcp_project_id} \                                         ║
-  ║       --command="cat /tmp/client.conf" > my-wireguard-client.conf             ║
-  ║                                                                               ║
-  ║  3. Import the downloaded file into your WireGuard client:                   ║
-  ║     • Mobile: Use QR code or import file                                     ║
-  ║     • Desktop: Import tunnel from file                                       ║
-  ║     • Command line: wg-quick up my-wireguard-client.conf                     ║
-  ║                                                                               ║
-  ║  4. Connect to your VPN and test connectivity!                               ║
-  ║                                                                               ║
-  ║  🔍 TROUBLESHOOTING:                                                          ║
-  ║  • Check setup status: use 'wireguard_setup_status_check' output            ║
-  ║  • Check service status: use 'wireguard_server_status_check' output         ║
-  ║  • View server logs: gcloud compute ssh [...] --command='journalctl -u wg-quick@wg0' ║
-  ║                                                                               ║
-  ╚═══════════════════════════════════════════════════════════════════════════════╝
+1. Wait for VM startup to complete (2-3 minutes after terraform apply)
 
+2. Get your client configuration file:
+   gcloud compute ssh ${local.vm_full_name} \
+     --zone ${var.zone} \
+     --project ${var.gcp_project_id} \
+     --command="cat /tmp/client.conf" > my-wireguard-client.conf
 
-  EOT
+3. Import the downloaded file into your WireGuard client:
+   • Mobile: Use QR code or import file
+   • Desktop: Import tunnel from file
+   • Command line: wg-quick up my-wireguard-client.conf
+
+4. Connect to your VPN and test connectivity!
+
+🔍 TROUBLESHOOTING:
+• Check setup status: use 'wireguard_setup_status_check' output
+• Check service status: use 'wireguard_server_status_check' output
+• View server logs: gcloud compute ssh [...] --command='journalctl -u wg-quick@wg0'
+
+EOT
 }

@@ -1,4 +1,4 @@
-#!/Users/cwawak/Documents/GitHub/UltaMongo/cluster-terraform/venv/bin/python
+#!/usr/bin/env python3
 """
 Confluent Endpoints with Proper Scrollable Interface using curses
 """

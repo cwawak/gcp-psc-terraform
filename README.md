@@ -74,6 +74,9 @@ This repository uses a step-by-step directory structure for Terraform deployment
 * `03-gcp-psc-endpoint/`: Creates the GCP PSC Endpoint and reserves its static IP.
 * `04-confluent-cluster/`: Creates the Confluent Cloud Kafka Cluster, Service Account, and API Key.
 * `05-gcp-dns/`: Creates the GCP Cloud DNS Private Zone and wildcard record.
+* `06-psc-service-attachment/`: **(Optional)** Creates a PSC Service Attachment for exposing your own services to Confluent Cloud (e.g., HTTP Sink connectors).
+* `confluent_scrollable.py`: Interactive monitoring tool for Confluent PSC endpoints with real-time status updates.
+* `get-wireguard-config.sh`: Script to generate WireGuard configuration from Terraform outputs.
 * `wireguard-config.md`: Detailed instructions for setting up the optional WireGuard VPN.
 * `README.md`: This main documentation file.
 
@@ -182,7 +185,33 @@ Follow these steps sequentially. Run commands from the root directory of this re
 2.  `terraform init`
 3.  `terraform apply -var-file=../dev.tfvars` (Confirm `yes`). This enables internal GCP DNS resolution.
 
-**Step 6: Configure VPN Access (Optional)**
+**Step 6: Deploy PSC Service Attachment (Optional) (`06-psc-service-attachment`)**
+
+This optional step creates a PSC Service Attachment that allows Confluent Cloud services (like HTTP Sink connectors) to connect back to services running in your GCP VPC.
+
+**Use Cases:**
+* HTTP Sink connectors that need to send data to an HTTPS endpoint in your VPC
+* Webhook receivers that need private connectivity from Confluent Cloud
+* Custom applications that need secure, private connectivity from Confluent services
+
+**Prerequisites:**
+* Existing VM with an HTTPS service running on port 443
+* HTTP service running on port 80 for Google Cloud health checks
+* Proper firewall tags configured on your VM
+
+**Deployment:**
+1.  `cd ../06-psc-service-attachment`
+2.  `terraform init`
+3.  `terraform apply -var-file=../dev.tfvars` (Confirm `yes`)
+4.  **Note Service Attachment URI:** Record the `service_attachment_uri` output for Confluent Cloud configuration.
+
+**Important Notes:**
+* Google Cloud health checks use port 80 despite configuring port 443
+* Your VM must run both HTTPS (port 443) for actual traffic and HTTP (port 80) for health checks
+* The load balancer provides TCP passthrough, not SSL termination
+* Configure your HTTP Sink connector in Confluent Cloud to use the Service Attachment URI
+
+**Step 7: Configure VPN Access (Optional)**
 
 This step provides secure access from your laptop into the private GCP VPC, allowing you to reach the Kafka cluster via its private endpoint.
 
@@ -200,10 +229,56 @@ This step provides secure access from your laptop into the private GCP VPC, allo
     * Ensure your laptop can resolve the `KAFKA_BOOTSTRAP_HOSTNAME` to the `PSC_ENDPOINT_IP` (e.g., via `/etc/hosts`).
     * Use `kcat` or `openssl` from your laptop's terminal, targeting the private `KAFKA_BOOTSTRAP_HOSTNAME` and using the API credentials.
 
+## Monitoring Tools
+
+### Confluent Endpoint Monitor (`confluent_scrollable.py`)
+
+An interactive terminal-based monitoring tool for viewing Confluent PSC endpoints in real-time:
+
+**Features:**
+* Real-time monitoring with auto-refresh (configurable interval)
+* Color-coded status indicators (✅ READY, ⏳ PENDING_ACCEPT, ❌ FAILED, 🔄 PROVISIONING)
+* Interactive keyboard navigation with scrolling support
+* Status summary with endpoint counts
+* Scrollable table view showing endpoint details (Name, ID, Status, IP, Connection ID)
+
+**Usage:**
+```bash
+# Make executable and run
+chmod +x confluent_scrollable.py
+./confluent_scrollable.py
+```
+
+**Controls:**
+* `r` - Manual refresh
+* `t` - Toggle auto-refresh
+* `↑/↓` - Navigate endpoints
+* `PgUp/PgDn` - Scroll page
+* `Home/End` - Jump to first/last
+* `q` - Quit
+
+**Requirements:**
+* Python 3 with `curses` module
+* Confluent CLI installed and authenticated
+* Access to `confluent network access-point private-link egress-endpoint list` command
+
+### WireGuard Configuration Generator (`get-wireguard-config.sh`)
+
+Script to automatically generate WireGuard client configuration from Terraform outputs. See `wireguard-config.md` for detailed VPN setup instructions.
+
 ## Cleanup
 
-To destroy all resources, run `terraform destroy` in **reverse order** (05 -> 04 -> 03 -> 02 -> 01).
+To destroy all resources, run `terraform destroy` in **reverse order**. If you deployed the optional PSC Service Attachment (step 6), include it in the cleanup sequence.
 
+**With PSC Service Attachment (06 -> 05 -> 04 -> 03 -> 02 -> 01):**
+1.  `cd 06-psc-service-attachment && terraform destroy -var-file=../dev.tfvars` (Confirm `yes`)
+2.  `cd ../05-gcp-dns && terraform destroy -var-file=../dev.tfvars` (Confirm `yes`)
+3.  `cd ../04-confluent-cluster && terraform destroy -var-file=../dev.tfvars` (Confirm `yes`)
+4.  `cd ../03-gcp-psc-endpoint && terraform destroy -var-file=../dev.tfvars` (Confirm `yes`)
+5.  `cd ../02-confluent-network && terraform destroy -var-file=../dev.tfvars` (Confirm `yes`)
+6.  `cd ../01-gcp-base && terraform destroy -var-file=../dev.tfvars` (Confirm `yes`)
+
+**Without PSC Service Attachment (05 -> 04 -> 03 -> 02 -> 01):**
 1.  `cd 05-gcp-dns && terraform destroy -var-file=../dev.tfvars` (Confirm `yes`)
 2.  `cd ../04-confluent-cluster && terraform destroy -var-file=../dev.tfvars` (Confirm `yes`)
 3.  `cd ../03-gcp-psc-endpoint && terraform destroy -var-file=../dev.tfvars` (Confirm `yes`)
