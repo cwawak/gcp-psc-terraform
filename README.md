@@ -287,20 +287,6 @@ To destroy all resources, run `terraform destroy` in **reverse order**. If you d
 
 Remember cleanup tasks for VPN (stop tunnel, remove hosts entry) and unset environment variables.
 
-## Using an Existing VPC/Subnet
-
-If you need to deploy the PSC connection within an existing VPC/Subnet:
-
-1.  **Prerequisites:** Obtain the names of your existing VPC and the Subnet where the PSC endpoint should reside, and the Subnet's region.
-2.  **Terraform Modifications & Workflow:**
-    * **Skip `01-gcp-base` `apply` for VPC/Subnet:** Do not apply `google_compute_network`/`google_compute_subnetwork`.
-    * **Populate `dev.tfvars`:** Manually set `vpc_name` and `subnet_name` with your existing resource names. Ensure `region` matches.
-    * **Run Step 02 (`02-confluent-network`):** Apply as normal. Update `dev.tfvars` with outputs.
-    * **Run Step 03 (`03-gcp-psc-endpoint`):** Apply as normal. Resources will be placed within your existing subnet. Update `dev.tfvars`.
-    * **Run Step 04 (`04-confluent-cluster`):** Apply as normal.
-    * **Run Step 05 (`05-gcp-dns`):** Apply as normal. The private zone will be associated with your existing VPC.
-    * **(Optional) VM/VPN/NAT/Firewalls:** Decide if you need these components from Step 01. If yes, carefully adapt `01-gcp-base/main.tf` to only create these resources, referencing your existing network. If no, omit these resources. VPN setup details remain in `wireguard-config.md`.
-
 ## Notes & Disclaimers
 
 * **Costs:** Resources deployed will incur costs in GCP and Confluent Cloud. Destroy resources after use if applicable.
